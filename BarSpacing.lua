@@ -1,6 +1,6 @@
 
 -- BarSpacing - World of Warcraft: Forever
--- Version 0.2.0
+-- Version 0.3.0
 -- Arranges Blizzard action buttons in a QWERTY keyboard layout.
 
 local addonName = ...
@@ -14,7 +14,6 @@ local BAR = {
     [2] = "MultiBarBottomLeftButton",
     [3] = "MultiBarBottomRightButton",
     [4] = "MultiBarRightButton",
-    [5] = "MultiBarLeftButton",
 }
 
 -- Returns a button using its bar and index.
@@ -55,7 +54,7 @@ end
 
 -- Verify all required buttons exist.
 local function ButtonsAvailable()
-    for bar = 1, 5 do
+    for bar = 1, 4 do
         for index = 1, 12 do
             if not Button(bar, index) then
                 Print("Missing button: Bar " .. bar .. ", Button " .. index)
@@ -184,33 +183,6 @@ local function Apply()
     Move(Button(4, 9), "BOTTOMLEFT", Button(1, 7), "TOPLEFT", stagger, padding)
 
     FollowRange(4, 10, 12, padding)
-
-
-
-    -------------------------------------------
-    -- ACTION BAR 5
-    -------------------------------------------
-
-    -- Anchor the first button to the right of the Shift number row.
-    Move(Button(5, 1), "LEFT", Button(3, 6), "RIGHT", step * 2, 0)
-
-    -- Arrange the remaining buttons in a 3 x 4 grid.
-    for index = 2, 12 do
-        local column = (index - 1) % 3
-        local row = math.floor((index - 1) / 3)
-
-        if column == 0 then
-            -- First button in each new row.
-            Move(Button(5, index), "TOPLEFT",
-                 Button(5, index - 3), "BOTTOMLEFT",
-                 0, -padding)
-        else
-            -- Next button in the same row.
-            Move(Button(5, index), "LEFT",
-                 Button(5, index - 1), "RIGHT",
-                 padding, 0)
-        end
-    end
 
 end
 
