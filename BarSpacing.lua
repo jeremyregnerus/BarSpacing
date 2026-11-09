@@ -1,6 +1,6 @@
 
 -- BarSpacing - World of Warcraft: Forever
--- Version 0.5.0
+-- Version 0.9.0
 -- QWERTY action bar layout with optional Shaman totem flyouts.
 
 local listener = CreateFrame("Frame")
@@ -12,6 +12,9 @@ local scheduled = false
 -------------------------------------------
 
 local ENABLE_SHAMAN_TOTEMS = true
+
+-- Hide macro names while preserving keybinding labels.
+local HIDE_MACRO_NAMES = true
 
 -- Main totem button size relative to normal action buttons.
 local TOTEM_BUTTON_SCALE = 1.0
@@ -34,6 +37,15 @@ local BAR = {
     [2] = "MultiBarBottomLeftButton",
     [3] = "MultiBarBottomRightButton",
     [4] = "MultiBarRightButton",
+    [5] = "MultiBarLeftButton",
+}
+
+-- Number of buttons used from each managed action bar.
+local BUTTON_COUNT = {
+    [1] = 12,
+    [2] = 12,
+    [3] = 12,
+    [4] = 7,
 }
 
 local function Button(bar, index)
@@ -50,7 +62,7 @@ local function InEditMode()
         and EditModeManagerFrame:IsEditModeActive()
 end
 
--- Control mouse interaction with Blizzard's MainActionBar frame.
+-- Prevent MainActionBar from intercepting mouse events.
 local function SetMainActionBarMouse(enabled)
     if InCombatLockdown() or not MainActionBar then
         return
@@ -60,9 +72,7 @@ local function SetMainActionBarMouse(enabled)
     MainActionBar:SetMouseMotionEnabled(enabled)
 end
 
--- Move a frame relative to another frame.
--- Blizzard action buttons use parent containers, so move
--- the container and leave the actual button centered inside it.
+-- Move the button container when one exists.
 local function Move(target, point, relative, relativePoint, x, y)
     local frame = target.container or target
 
@@ -75,6 +85,7 @@ local function Move(target, point, relative, relativePoint, x, y)
     frame:SetPoint(point, relative, relativePoint, x, y)
 end
 
+-- Anchor consecutive buttons to their predecessors.
 local function FollowRange(bar, first, last, padding)
     for index = first, last do
         Move(
@@ -90,7 +101,7 @@ end
 
 local function ButtonsAvailable()
     for bar = 1, 4 do
-        for index = 1, 12 do
+        for index = 1, BUTTON_COUNT[bar] do
             if not Button(bar, index) then
                 Print("Missing Bar " .. bar .. " Button " .. index)
                 return false
@@ -102,18 +113,37 @@ local function ButtonsAvailable()
 end
 
 -------------------------------------------
+-- MACRO NAME VISIBILITY
+-------------------------------------------
+
+-- Hide macro labels without affecting keybinding text.
+-- Includes Action Bar 5, but does not modify its layout.
+local function UpdateMacroNames()
+    for bar = 1, 5 do
+        for index = 1, 12 do
+            local button = Button(bar, index)
+
+            if button then
+                local name = button.Name
+                    or _G[button:GetName() .. "Name"]
+
+                if name then
+                    name:SetAlpha(HIDE_MACRO_NAMES and 0 or 1)
+                end
+            end
+        end
+    end
+end
+
+-------------------------------------------
 -- SHAMAN TOTEM SUPPORT
 -------------------------------------------
 
 -- F1-F4 correspond to Bar 2, Buttons 9-12.
--- F5-F8 remain ordinary action buttons.
+-- F5-F8 are regular action buttons on Bar 3.
 
 local function FButton(position)
-    if position <= 4 then
-        return Button(2, position + 8)
-    end
-
-    return Button(4, position + 4)
+    return Button(2, position + 8)
 end
 
 local bindingOwner = isShaman
@@ -122,7 +152,6 @@ local bindingOwner = isShaman
 
 local replacedButtons = {}
 
--- Restore an ordinary action button.
 local function RestoreFButton(position)
     if not replacedButtons[position] then return end
 
@@ -146,7 +175,7 @@ local function RestoreShamanButtons()
     end
 end
 
--- Scale a native button to match a regular action button.
+-- Match the native totem button size to a standard action button.
 local function MatchSize(nativeButton, referenceButton)
     local nativeWidth = nativeButton:GetWidth()
     local referenceWidth = referenceButton:GetWidth()
@@ -171,7 +200,6 @@ local function MatchSize(nativeButton, referenceButton)
     end
 end
 
--- Identify which totem preset page is active.
 local function CurrentTotemPage()
     local bar = _G.MultiCastActionBarFrame
     local page = bar and bar.currentPage
@@ -188,7 +216,7 @@ local function CurrentTotemPage()
     return page
 end
 
--- Restore the original F-key binding on each native totem slot.
+-- Redirect F1-F4 bindings to the native Shaman totem buttons.
 local function BindTotemButton(position)
     local bindingAction = "MULTIACTIONBAR1BUTTON" .. (position + 8)
 
@@ -219,7 +247,6 @@ local function BindTotemButton(position)
     end
 end
 
--- Resize the native flyout menu and its opening button.
 local function ResizeTotemFlyouts()
     local flyout = _G.MultiCastFlyoutFrame
 
@@ -234,7 +261,6 @@ local function ResizeTotemFlyouts()
     end
 end
 
--- Position the native elemental totem controls at F1-F4.
 local function ApplyShamanTotems()
     if not isShaman then return end
 
@@ -256,7 +282,7 @@ local function ApplyShamanTotems()
             Move(slot, "CENTER", reference, "CENTER", 0, 0)
             MatchSize(slot, reference)
 
-            -- Align all three totem preset pages.
+            -- Position the action buttons for all three totem pages.
             for page = 1, 3 do
                 local actionIndex = (page - 1) * 4 + position
 
@@ -277,8 +303,7 @@ local function ApplyShamanTotems()
                 end
             end
 
-            -- Hide the ordinary F-key action button.
-            -- Keep its position as a reference.
+            -- Hide the original F-key button but retain its anchor.
             if not replacedButtons[position] then
                 reference:SetAlpha(0)
                 reference:EnableMouse(false)
@@ -329,12 +354,13 @@ local function Apply()
 
     -------------------------------------------
     -- ACTION BAR 1
+    -- Primary number and Q row
     -------------------------------------------
 
-    -- Number row.
+    -- Number row: Buttons 1-7.
     FollowRange(1, 2, 7, padding)
 
-    -- Q row.
+    -- Q row: Buttons 8-12.
     Move(Button(1, 8), "TOPLEFT", Button(1, 2), "BOTTOMLEFT", stagger, -padding)
     FollowRange(1, 9, 9, padding)
 
@@ -344,54 +370,30 @@ local function Apply()
 
     -------------------------------------------
     -- ACTION BAR 2
+    -- Primary A and Z rows, plus F1-F4
     -------------------------------------------
 
-    -- A row.
+    -- A row: Buttons 1-3.
     Move(Button(2, 1), "TOPLEFT", Button(1, 8), "BOTTOMLEFT", stagger, -padding)
     Move(Button(2, 2), "LEFT", Button(2, 1), "RIGHT", step * 3, 0)
     FollowRange(2, 3, 3, padding)
 
-    -- Z row.
+    -- Z row: Buttons 4-8.
     Move(Button(2, 4), "TOPLEFT", Button(2, 1), "BOTTOMLEFT", stagger, -padding)
     FollowRange(2, 5, 8, padding)
 
-    -- F1-F4.
+    -- F1-F4: Buttons 9-12.
     Move(Button(2, 9), "BOTTOMLEFT", Button(1, 2), "TOPLEFT", stagger, padding)
     FollowRange(2, 10, 12, padding)
 
     -------------------------------------------
     -- ACTION BAR 3
+    -- F5-F8, Shift number row, Shift Q row
     -------------------------------------------
 
-    -- Shift number row.
-    Move(Button(3, 1), "LEFT", Button(1, 7), "RIGHT", step, 0)
-    FollowRange(3, 2, 6, padding)
-
-    -- Shift Q row.
-    Move(Button(3, 7), "TOPLEFT", Button(3, 1), "BOTTOMLEFT", stagger, -padding)
-    FollowRange(3, 8, 8, padding)
-
-    -- Gap before Shift R.
-    Move(Button(3, 9), "LEFT", Button(3, 8), "RIGHT", step, 0)
-    FollowRange(3, 10, 12, padding)
-
-    -------------------------------------------
-    -- ACTION BAR 4
-    -------------------------------------------
-
-    -- Shift A row.
-    Move(Button(4, 1), "TOPLEFT", Button(3, 7), "BOTTOMLEFT", stagger, -padding)
-    Move(Button(4, 2), "LEFT", Button(4, 1), "RIGHT", step * 3, 0)
-    FollowRange(4, 3, 3, padding)
-
-    -- Shift Z row.
-    Move(Button(4, 4), "TOPLEFT", Button(4, 1), "BOTTOMLEFT", stagger, -padding)
-    FollowRange(4, 5, 8, padding)
-
-    -- F5-F8.
-    -- Leave a full button-width gap between F4 and F5.
+    -- F5-F8: Buttons 1-4.
     Move(
-        Button(4, 9),
+        Button(3, 1),
         "LEFT",
         Button(2, 12),
         "RIGHT",
@@ -399,7 +401,90 @@ local function Apply()
         0
     )
 
-    FollowRange(4, 10, 12, padding)
+    FollowRange(3, 2, 4, padding)
+
+    -- Shift number row: Buttons 5-9.
+    Move(
+        Button(3, 5),
+        "LEFT",
+        Button(1, 7),
+        "RIGHT",
+        step,
+        0
+    )
+
+    FollowRange(3, 6, 9, padding)
+
+    -- Shift Q row: Buttons 10-12.
+    -- Shift+Q, Shift+W, Shift+R.
+    Move(
+        Button(3, 10),
+        "TOPLEFT",
+        Button(3, 5),
+        "BOTTOMLEFT",
+        stagger,
+        -padding
+    )
+
+    FollowRange(3, 11, 11, padding)
+
+    -- Gap before Shift+R.
+    Move(
+        Button(3, 12),
+        "LEFT",
+        Button(3, 11),
+        "RIGHT",
+        step,
+        0
+    )
+
+    -------------------------------------------
+    -- ACTION BAR 4
+    -- Shift T, A, G, Z, X, C, V
+    -------------------------------------------
+
+    -- Shift+T: Button 1.
+    Move(
+        Button(4, 1),
+        "LEFT",
+        Button(3, 12),
+        "RIGHT",
+        padding,
+        0
+    )
+
+    -- Shift+A and Shift+G: Buttons 2-3.
+    Move(
+        Button(4, 2),
+        "TOPLEFT",
+        Button(3, 10),
+        "BOTTOMLEFT",
+        stagger,
+        -padding
+    )
+
+    Move(
+        Button(4, 3),
+        "LEFT",
+        Button(4, 2),
+        "RIGHT",
+        step * 3,
+        0
+    )
+
+    -- Shift+Z through Shift+V: Buttons 4-7.
+    Move(
+        Button(4, 4),
+        "TOPLEFT",
+        Button(4, 2),
+        "BOTTOMLEFT",
+        stagger,
+        -padding
+    )
+
+    FollowRange(4, 5, 7, padding)
+
+    -- Buttons 8-12 are reserved for future use.
 
     -------------------------------------------
     -- SHAMAN TOTEMS
@@ -407,8 +492,13 @@ local function Apply()
 
     ApplyShamanTotems()
 
-    -- Prevent MainActionBar from intercepting mouse
-    -- interaction with our repositioned buttons.
+    -------------------------------------------
+    -- MACRO LABELS
+    -------------------------------------------
+
+    UpdateMacroNames()
+
+    -- Prevent MainActionBar from intercepting mouse events.
     SetMainActionBarMouse(false)
 
     -- Action Bar 5 remains Blizzard-controlled.
@@ -484,14 +574,13 @@ SlashCmdList.BARSPACING = function(msg)
     end
 end
 
+-- Restore MainActionBar mouse behavior in Edit Mode.
 if EventRegistry and EventRegistry.RegisterCallback then
 
-    -- Restore normal mouse interaction when entering Edit Mode.
     EventRegistry:RegisterCallback("EditMode.Enter", function()
         SetMainActionBarMouse(true)
     end, listener)
 
-    -- Reapply our layout and mouse settings after Edit Mode.
     EventRegistry:RegisterCallback("EditMode.Exit", ScheduleApply, listener)
 
 end
