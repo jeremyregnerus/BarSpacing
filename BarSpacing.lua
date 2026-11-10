@@ -1,6 +1,6 @@
 
 -- BarSpacing - World of Warcraft: Forever
--- Version 0.9.0
+-- Version 0.11.0
 -- QWERTY action bar layout with optional Shaman totem flyouts.
 
 local listener = CreateFrame("Frame")
@@ -13,8 +13,14 @@ local scheduled = false
 
 local ENABLE_SHAMAN_TOTEMS = true
 
+-- Display inherited F-key bindings on the native totem buttons.
+local SHOW_TOTEM_KEYBINDS = true
+
 -- Hide macro names while preserving keybinding labels.
 local HIDE_MACRO_NAMES = true
+
+-- Hide Blizzard's native Stance Bar.
+local HIDE_STANCE_BAR = true
 
 -- Main totem button size relative to normal action buttons.
 local TOTEM_BUTTON_SCALE = 1.0
@@ -24,6 +30,9 @@ local TOTEM_FLYOUT_SCALE = 1.2
 
 -- Scale for the small button that opens the flyout.
 local TOTEM_ARROW_SCALE = 1.2
+
+local TOTEM_HOTKEY_OFFSET_X = 0
+local TOTEM_HOTKEY_OFFSET_Y = 2
 
 local _, playerClass = UnitClass("player")
 local isShaman = playerClass == "SHAMAN" and ENABLE_SHAMAN_TOTEMS
@@ -60,6 +69,29 @@ local function InEditMode()
     return EditModeManagerFrame
         and EditModeManagerFrame.IsEditModeActive
         and EditModeManagerFrame:IsEditModeActive()
+end
+
+-------------------------------------------
+-- STANCE BAR VISIBILITY
+-------------------------------------------
+
+local stanceBarDriverInstalled = false
+
+local function ApplyStanceBarVisibility()
+    if not HIDE_STANCE_BAR
+        or stanceBarDriverInstalled
+        or InCombatLockdown() then
+        return
+    end
+
+    -- Modern Blizzard clients use StanceBar.
+    -- The fallback supports older frame naming.
+    local bar = _G.StanceBar or _G.StanceBarFrame
+
+    if bar and RegisterStateDriver then
+        RegisterStateDriver(bar, "visibility", "hide")
+        stanceBarDriverInstalled = true
+    end
 end
 
 -- Prevent MainActionBar from intercepting mouse events.
@@ -216,6 +248,93 @@ local function CurrentTotemPage()
     return page
 end
 
+-- Update the visible keybinding label on a native totem button.
+-- The label matches the original action button's binding.
+local function UpdateTotemHotkey(button)
+    if not isShaman or not SHOW_TOTEM_KEYBINDS
+        or InCombatLockdown() or not button then
+        return
+    end
+
+    local buttonName = button:GetName()
+    if not buttonName then return end
+
+    -- Identify the totem action button (1-12).
+    local actionIndex = tonumber(
+        buttonName:match("^MultiCastActionButton(%d+)$")
+    )
+
+    if not actionIndex or actionIndex < 1 or actionIndex > 12 then
+        return
+    end
+
+    -- Each Call page contains the same four elemental positions.
+    local position = ((actionIndex - 1) % 4) + 1
+
+    local bindingAction =
+        "MULTIACTIONBAR1BUTTON" .. (position + 8)
+
+    -- Use the actual binding, with F1-F4 as a fallback.
+    local key = GetBindingKey(bindingAction) or ("F" .. position)
+
+    local text = GetBindingText(key, 1)
+    if not text or text == "" then
+        text = key
+    end
+
+    local hotkey = button.HotKey
+        or _G[buttonName .. "HotKey"]
+
+    
+	if hotkey then
+		-- Get the original action button's keybinding text.
+		local reference = FButton(position)
+
+		local referenceHotkey = reference.HotKey
+			or _G[reference:GetName() .. "HotKey"]
+
+		if referenceHotkey then
+			-- Copy the font, size, and outline.
+			local font, size, flags = referenceHotkey:GetFont()
+
+			-- Compensate for the different frame scales.
+			local referenceScale = referenceHotkey:GetEffectiveScale()
+			local totemScale = hotkey:GetEffectiveScale()
+
+			if font and size and totemScale > 0 then
+				local adjustedSize = size * referenceScale / totemScale
+
+				hotkey:SetFont(font, adjustedSize, flags)
+			end
+
+			-- Match the original keybinding text color.
+			hotkey:SetTextColor(referenceHotkey:GetTextColor())
+			
+			-- Match the original keybinding label's position.
+			hotkey:ClearAllPoints()
+			hotkey:SetPoint("TOPRIGHT", referenceHotkey, "TOPRIGHT", TOTEM_HOTKEY_OFFSET_X, TOTEM_HOTKEY_OFFSET_Y)
+
+			-- Match the original text alignment.
+			hotkey:SetJustifyH(referenceHotkey:GetJustifyH())
+		end
+
+		-- Display the inherited keybinding.
+		hotkey:SetText(text)
+		hotkey:Show()
+	end
+end
+
+-- Update the labels for all three possible totem pages.
+local function UpdateAllTotemHotkeys()
+    if not SHOW_TOTEM_KEYBINDS then return end
+
+    for index = 1, 12 do
+        UpdateTotemHotkey(
+            _G["MultiCastActionButton" .. index]
+        )
+    end
+end
+
 -- Redirect F1-F4 bindings to the native Shaman totem buttons.
 local function BindTotemButton(position)
     local bindingAction = "MULTIACTIONBAR1BUTTON" .. (position + 8)
@@ -317,6 +436,9 @@ local function ApplyShamanTotems()
     end
 
     ResizeTotemFlyouts()
+
+    -- Display F-key labels after installing the bindings.
+    UpdateAllTotemHotkeys()
 end
 
 -------------------------------------------
@@ -328,6 +450,9 @@ local function Apply()
         pending = true
         return
     end
+
+    -- Hide Blizzard's Stance Bar if enabled.
+    ApplyStanceBarVisibility()
 
     if not ButtonsAvailable() then return end
 
@@ -521,13 +646,29 @@ local function ScheduleApply()
 end
 
 local hookedTotemUpdates = false
+local hookedHotkeyUpdates = false
 
 local function HookTotemUpdates()
-    if not isShaman or hookedTotemUpdates then return end
+    if not isShaman then return end
 
-    if type(MultiCastActionBarFrame_Update) == "function" then
+    if not hookedTotemUpdates
+        and type(MultiCastActionBarFrame_Update) == "function" then
+
         hooksecurefunc("MultiCastActionBarFrame_Update", ScheduleApply)
         hookedTotemUpdates = true
+    end
+
+    -- Blizzard may refresh the native hotkey labels.
+    -- Reapply our inherited labels after those updates.
+    if SHOW_TOTEM_KEYBINDS
+        and not hookedHotkeyUpdates
+        and type(ActionButton_UpdateHotkeys) == "function" then
+
+        hooksecurefunc("ActionButton_UpdateHotkeys", function(button)
+            UpdateTotemHotkey(button)
+        end)
+
+        hookedHotkeyUpdates = true
     end
 end
 
@@ -537,6 +678,7 @@ listener:RegisterEvent("PLAYER_REGEN_ENABLED")
 if isShaman then
     listener:RegisterEvent("SPELLS_CHANGED")
     listener:RegisterEvent("UPDATE_MULTI_CAST_ACTIONBAR")
+    listener:RegisterEvent("UPDATE_BINDINGS")
 end
 
 listener:SetScript("OnEvent", function(_, event)
