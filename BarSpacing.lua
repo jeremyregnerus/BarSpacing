@@ -1,6 +1,6 @@
 
 -- BarSpacing - World of Warcraft: Forever
--- Version 0.11.0
+-- Version 0.12.0
 -- QWERTY action bar layout with optional Shaman totem flyouts.
 
 local listener = CreateFrame("Frame")
@@ -12,6 +12,10 @@ local scheduled = false
 -------------------------------------------
 
 local ENABLE_SHAMAN_TOTEMS = true
+
+-- Hide the original Totem Bar decoration and Recall button,
+-- without hiding the relocated elemental and Call buttons.
+local HIDE_UNUSED_TOTEM_BAR = true
 
 -- Display inherited F-key bindings on the native totem buttons.
 local SHOW_TOTEM_KEYBINDS = true
@@ -171,11 +175,14 @@ end
 -- SHAMAN TOTEM SUPPORT
 -------------------------------------------
 
--- F1-F4 correspond to Bar 2, Buttons 9-12.
--- F5-F8 are regular action buttons on Bar 3.
-
+-- F1-F4 use Bar 2, Buttons 9-12.
+-- F5 uses Bar 3, Button 1; F6-F8 stay ordinary buttons.
 local function FButton(position)
-    return Button(2, position + 8)
+    if position <= 4 then
+        return Button(2, position + 8)
+    elseif position == 5 then
+        return Button(3, 1)
+    end
 end
 
 local bindingOwner = isShaman
@@ -198,7 +205,7 @@ local function RestoreFButton(position)
 end
 
 local function RestoreShamanButtons()
-    for position = 1, 4 do
+    for position = 1, 5 do
         RestoreFButton(position)
     end
 
@@ -259,80 +266,82 @@ local function UpdateTotemHotkey(button)
     local buttonName = button:GetName()
     if not buttonName then return end
 
-    -- Identify the totem action button (1-12).
-    local actionIndex = tonumber(
-        buttonName:match("^MultiCastActionButton(%d+)$")
-    )
+    local position
+    local bindingAction
 
-    if not actionIndex or actionIndex < 1 or actionIndex > 12 then
-        return
+    if buttonName == "MultiCastSummonSpellButton" then
+        -- Call of the Elements occupies F5 (Bar 3, Button 1).
+        position = 5
+        bindingAction = "MULTIACTIONBAR2BUTTON1"
+    else
+        -- All three Call pages have four elemental buttons.
+        local actionIndex = tonumber(
+            buttonName:match("^MultiCastActionButton(%d+)$")
+        )
+
+        if not actionIndex or actionIndex < 1 or actionIndex > 12 then
+            return
+        end
+
+        position = ((actionIndex - 1) % 4) + 1
+        bindingAction = "MULTIACTIONBAR1BUTTON" .. (position + 8)
     end
 
-    -- Each Call page contains the same four elemental positions.
-    local position = ((actionIndex - 1) % 4) + 1
+    local reference = FButton(position)
+    if not reference then return end
 
-    local bindingAction =
-        "MULTIACTIONBAR1BUTTON" .. (position + 8)
+    local referenceHotkey = reference.HotKey
+        or _G[reference:GetName() .. "HotKey"]
+    if not referenceHotkey then return end
 
-    -- Use the actual binding, with F1-F4 as a fallback.
     local key = GetBindingKey(bindingAction) or ("F" .. position)
-
     local text = GetBindingText(key, 1)
     if not text or text == "" then
         text = key
     end
 
-    local hotkey = button.HotKey
-        or _G[buttonName .. "HotKey"]
+    local hotkey = button.HotKey or _G[buttonName .. "HotKey"]
 
-    
-	if hotkey then
-		-- Get the original action button's keybinding text.
-		local reference = FButton(position)
+    -- The Call button may not expose the same HotKey region as
+    -- the elemental buttons. Create one only if necessary.
+    if not hotkey and position == 5 then
+        hotkey = button.BarSpacingHotKey
+        if not hotkey then
+            hotkey = button:CreateFontString(nil, "OVERLAY")
+            button.BarSpacingHotKey = hotkey
+        end
+    end
 
-		local referenceHotkey = reference.HotKey
-			or _G[reference:GetName() .. "HotKey"]
+    if not hotkey then return end
 
-		if referenceHotkey then
-			-- Copy the font, size, and outline.
-			local font, size, flags = referenceHotkey:GetFont()
+    local font, size, flags = referenceHotkey:GetFont()
+    local referenceScale = referenceHotkey:GetEffectiveScale()
+    local nativeScale = hotkey:GetEffectiveScale()
 
-			-- Compensate for the different frame scales.
-			local referenceScale = referenceHotkey:GetEffectiveScale()
-			local totemScale = hotkey:GetEffectiveScale()
+    if font and size and nativeScale and nativeScale > 0 then
+        hotkey:SetFont(font, size * referenceScale / nativeScale, flags)
+    end
 
-			if font and size and totemScale > 0 then
-				local adjustedSize = size * referenceScale / totemScale
-
-				hotkey:SetFont(font, adjustedSize, flags)
-			end
-
-			-- Match the original keybinding text color.
-			hotkey:SetTextColor(referenceHotkey:GetTextColor())
-			
-			-- Match the original keybinding label's position.
-			hotkey:ClearAllPoints()
-			hotkey:SetPoint("TOPRIGHT", referenceHotkey, "TOPRIGHT", TOTEM_HOTKEY_OFFSET_X, TOTEM_HOTKEY_OFFSET_Y)
-
-			-- Match the original text alignment.
-			hotkey:SetJustifyH(referenceHotkey:GetJustifyH())
-		end
-
-		-- Display the inherited keybinding.
-		hotkey:SetText(text)
-		hotkey:Show()
-	end
+    hotkey:SetTextColor(referenceHotkey:GetTextColor())
+    hotkey:ClearAllPoints()
+    hotkey:SetPoint(
+        "TOPRIGHT", referenceHotkey, "TOPRIGHT",
+        TOTEM_HOTKEY_OFFSET_X, TOTEM_HOTKEY_OFFSET_Y
+    )
+    hotkey:SetJustifyH(referenceHotkey:GetJustifyH())
+    hotkey:SetText(text)
+    hotkey:Show()
 end
 
--- Update the labels for all three possible totem pages.
+-- Update all elemental pages plus the Call button on F5.
 local function UpdateAllTotemHotkeys()
     if not SHOW_TOTEM_KEYBINDS then return end
 
     for index = 1, 12 do
-        UpdateTotemHotkey(
-            _G["MultiCastActionButton" .. index]
-        )
+        UpdateTotemHotkey(_G["MultiCastActionButton" .. index])
     end
+
+    UpdateTotemHotkey(_G.MultiCastSummonSpellButton)
 end
 
 -- Redirect F1-F4 bindings to the native Shaman totem buttons.
@@ -364,6 +373,74 @@ local function BindTotemButton(position)
             nativeButtonName, "LeftButton"
         )
     end
+end
+
+-- F5 inherits the original binding of Bar 3, Button 1.
+-- This redirects the key to Blizzard's native Call button,
+-- preserving its page-selection flyout on mouseover.
+local function BindCallButton()
+    local summon = _G.MultiCastSummonSpellButton
+    if not summon then return end
+
+    local key1, key2 = GetBindingKey("MULTIACTIONBAR2BUTTON1")
+    if not key1 and not key2 then
+        key1 = "F5"
+    end
+
+    if key1 then
+        SetOverrideBindingClick(
+            bindingOwner, true, key1,
+            "MultiCastSummonSpellButton", "LeftButton"
+        )
+    end
+
+    if key2 and key2 ~= key1 then
+        SetOverrideBindingClick(
+            bindingOwner, true, key2,
+            "MultiCastSummonSpellButton", "LeftButton"
+        )
+    end
+end
+
+-- Preserve Edit Mode interaction with the native parent frame.
+local function SetTotemBarMouse(enabled)
+    if not isShaman or InCombatLockdown() then return end
+
+    local bar = _G.MultiCastActionBarFrame
+    if bar and bar.SetMouseClickEnabled then
+        bar:SetMouseClickEnabled(enabled)
+        bar:SetMouseMotionEnabled(enabled)
+    end
+end
+
+-- Hide only the unused Totem Bar pieces. Never hide the
+-- MultiCastActionBarFrame parent: our relocated buttons still
+-- belong to it, and hiding it would hide them as well.
+local function HideUnusedTotemBar()
+    if not HIDE_UNUSED_TOTEM_BAR then return end
+    local bar = _G.MultiCastActionBarFrame
+    if not bar then return end
+
+    -- Artwork directly owned by the original bar (not its
+    -- child buttons or their textures).
+    for i = 1, bar:GetNumRegions() do
+        local region = select(i, bar:GetRegions())
+        if region and region:IsObjectType("Texture") then
+            region:SetAlpha(0)
+        end
+    end
+
+    -- Totemic Recall remains usable when put on an ordinary
+    -- action slot such as F6, so hide the native duplicate.
+    local recall = _G.MultiCastRecallSpellButton
+    if recall then
+        recall:SetAlpha(0)
+        recall:EnableMouse(false)
+    end
+
+    -- Don't let the unused parent area intercept mouse events.
+    -- Its individual totem buttons retain their own mouse input.
+    SetTotemBarMouse(false)
 end
 
 local function ResizeTotemFlyouts()
@@ -435,9 +512,30 @@ local function ApplyShamanTotems()
         end
     end
 
-    ResizeTotemFlyouts()
+    -- F5: relocate the native Call button to Bar 3, Button 1.
+    -- Its native mouseover flyout selects Call presets.
+    local summon = _G.MultiCastSummonSpellButton
+    local callReference = FButton(5)
 
-    -- Display F-key labels after installing the bindings.
+    if summon and summon:IsShown() and callReference then
+        Move(summon, "CENTER", callReference, "CENTER", 0, 0)
+        MatchSize(summon, callReference)
+
+        if not replacedButtons[5] then
+            callReference:SetAlpha(0)
+            callReference:EnableMouse(false)
+            replacedButtons[5] = true
+        end
+
+        BindCallButton()
+    else
+        RestoreFButton(5)
+    end
+
+    ResizeTotemFlyouts()
+    HideUnusedTotemBar()
+
+    -- Display F1-F5 labels after installing the bindings.
     UpdateAllTotemHotkeys()
 end
 
@@ -721,6 +819,9 @@ if EventRegistry and EventRegistry.RegisterCallback then
 
     EventRegistry:RegisterCallback("EditMode.Enter", function()
         SetMainActionBarMouse(true)
+        if HIDE_UNUSED_TOTEM_BAR then
+            SetTotemBarMouse(true)
+        end
     end, listener)
 
     EventRegistry:RegisterCallback("EditMode.Exit", ScheduleApply, listener)

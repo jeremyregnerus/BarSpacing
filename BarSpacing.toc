@@ -2,7 +2,7 @@
 ## Title: BarSpacing
 ## Notes: Arranges Blizzard action bar buttons in a staggered QWERTY keyboard layout.
 ## Author: Tielc
-## Version: 0.11.0
+## Version: 0.12.0
 ## X-Category: Action Bars
 
 BarSpacing.lua
